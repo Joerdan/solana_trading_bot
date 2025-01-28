@@ -1,39 +1,41 @@
-
 import os
-import requests
-from solana.rpc.api import Client
-from telebot import TeleBot
-from flask import Flask
+from flask import Flask, request
+from telebot import TeleBot, types
 
-# Configuration (Environment Variables)
+# Load environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
-WALLET_PRIVATE_KEY = os.getenv("WALLET_PRIVATE_KEY")
-SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
+WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook"
 
-# Ensure sensitive variables are set
-if not TELEGRAM_BOT_TOKEN or not DATABASE_URL or not WALLET_PRIVATE_KEY:
-    raise EnvironmentError("Missing required environment variables. Please set TELEGRAM_BOT_TOKEN, DATABASE_URL, and WALLET_PRIVATE_KEY.")
-
-# Solana Client
-solana_client = Client(SOLANA_RPC_URL)
-
-# Telegram Bot
+# Initialize the bot and Flask app
 bot = TeleBot(TELEGRAM_BOT_TOKEN)
-
-# Flask App
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "Bot is running!"
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    """Handles incoming updates from Telegram."""
+    json_string = request.get_data().decode("utf-8")
+    update = types.Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+@app.route("/", methods=["GET"])
+def index():
+    """Health check route."""
+    return "Bot is running!", 200
+
+# Define a simple command handler
+@bot.message_handler(commands=["start"])
+def send_welcome(message):
+    bot.reply_to(message, "Welcome to Soltradingjoe_bot! How can I assist you today?")
+
+@bot.message_handler(commands=["help"])
+def send_help(message):
+    bot.reply_to(message, "Here are the commands you can use:\n/start - Start the bot\n/help - Get help")
 
 if __name__ == "__main__":
-    from threading import Thread
+    # Remove any previous webhooks and set a new one
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
 
-    # Start Flask app in a thread
-    flask_thread = Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": 5000})
-    flask_thread.start()
-
-    # Start Telegram bot polling
-    bot.polling()
+    # Run the Flask app
+    app.run(host="0.0.0.0", port=5000)
