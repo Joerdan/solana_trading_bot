@@ -1,5 +1,6 @@
 
-requests
-solana
-pyTelegramBotAPI
 Flask
+pyTelegramBotAPI
+requests
+psycopg2-binary
+
