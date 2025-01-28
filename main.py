@@ -55,75 +55,30 @@ def send_help(message):
         return
     bot.reply_to(message, "Commands:\n/start - Start the bot\n/help - Get help\n/signals - Show recent buy/sell signals.")
 
-# Seed Database with Initial Data
-def seed_database():
-    initial_data = [
-        {
-            "name": "BONK",
-            "address": "BonkTokenAddressHere",
-            "buy_price": 0.00001,
-            "sell_price": 0.000013,
-            "signal_time": "2023-01-01 00:00:00",
-            "status": "success"
-        },
-        {
-            "name": "TRUMP",
-            "address": "TrumpTokenAddressHere",
-            "buy_price": 6.50,
-            "sell_price": 75.35,
-            "signal_time": "2025-01-01 00:00:00",
-            "status": "success"
-        }
-    ]
-
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        for data in initial_data:
-            cur.execute(
-                """
-                INSERT INTO signals (name, address, buy_price, sell_price, signal_time, status)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (address) DO NOTHING;
-                """,
-                (
-                    data["name"],
-                    data["address"],
-                    data["buy_price"],
-                    data["sell_price"],
-                    data["signal_time"],
-                    data["status"]
-                )
-            )
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("Initial data seeded successfully.")
-    except Exception as e:
-        print(f"Error seeding database: {e}")
-
 # Signal Generation Logic
 def fetch_meme_coins():
     url = "https://api.dexscreener.com/latest/dex/pairs/solana"
     response = requests.get(url)
     if response.status_code == 200:
         coins = response.json().get("pairs", [])
+        print("Fetched coins:", coins)  # Debug: Log fetched data
         return [
             {
                 "name": coin["baseToken"]["name"],
                 "address": coin["baseToken"]["address"],
-                "price": float(coin["priceUsd"]),
-                "volume": float(coin["volume"]),
-                "liquidity": float(coin["liquidity"]),
+                "price": float(coin.get("priceUsd", 0)),
+                "volume": float(coin.get("volume", 0)),
+                "liquidity": float(coin.get("liquidity", 0)),
                 "age": coin.get("age", "unknown"),
             }
             for coin in coins
         ]
+    print("Failed to fetch data from Dexscreener:", response.status_code)  # Debug: Log failure
     return []
 
 def store_signal(signal):
     try:
+        print("Storing signal:", signal)  # Debug: Log signal being stored
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -171,7 +126,7 @@ def generate_signals():
     coins = fetch_meme_coins()
     signals = []
     for coin in coins:
-        if coin["liquidity"] > 5000 and coin["volume"] > 1000:
+        if coin["liquidity"] > 1000 and coin["volume"] > 500:  # Lowered thresholds for testing
             buy_price = coin["price"]
             sell_price = buy_price * 1.3
             signal = {
@@ -206,6 +161,8 @@ def send_signals():
                     f"Reason: {signal['reason']}",
                     reply_markup=markup
                 )
+        else:
+            print("No signals generated at this time.")  # Debug: Log when no signals are generated
         update_signal_status()
         time.sleep(600)  # Run every 10 minutes
 
@@ -221,23 +178,29 @@ def show_signals(message):
     if not is_authorized(message.from_user.id):
         bot.reply_to(message, "You are not authorized to use this bot.")
         return
-    signals = generate_signals()
-    if signals:
-        for signal in signals:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT name, address, buy_price, sell_price FROM signals WHERE status = 'pending';")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    if rows:
+        for row in rows:
+            name, address, buy_price, sell_price = row
             markup = types.InlineKeyboardMarkup()
             copy_button = types.InlineKeyboardButton(
-                text="Copy Address", callback_data=f"copy_{signal['address']}"
+                text="Copy Address", callback_data=f"copy_{address}"
             )
             markup.add(copy_button)
 
             bot.send_message(
                 message.chat.id,
                 f"💡 Signal:\n\n"
-                f"Token: {signal['name']}\n"
-                f"Address: {signal['address']}\n"
-                f"Buy Price: ${signal['buy_price']:.4f}\n"
-                f"Sell Target: ${signal['sell_price']:.4f}\n"
-                f"Reason: {signal['reason']}",
+                f"Token: {name}\n"
+                f"Address: {address}\n"
+                f"Buy Price: ${buy_price:.4f}\n"
+                f"Sell Target: ${sell_price:.4f}\n",
                 reply_markup=markup
             )
     else:
@@ -247,9 +210,6 @@ def show_signals(message):
 if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
-
-    # Seed database with initial data
-    seed_database()
 
     # Start the signal thread
     signal_thread = Thread(target=send_signals)
